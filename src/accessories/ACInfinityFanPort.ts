@@ -63,7 +63,10 @@ export class ACInfinityFanPort {
 
   async setActive(value: CharacteristicValue): Promise<void> {
     const active = value === this.platform.Characteristic.Active.ACTIVE;
-    const speed = active ? 10 : 0; // Default to speed 10 when turning on
+    // Safe wake speed when turning on:
+        // Prefer lastSetSpeed if known, otherwise wake at 1 (10%) instead of blasting to 10 (100%).
+        const wakeSpeed = (this.lastSetSpeed !== null && this.lastSetSpeed > 0) ? this.lastSetSpeed : 1;
+        const speed = active ? wakeSpeed : 0;
     this.platform.log.info(`[FanPort] SETACTIVE CALLED: port ${this.portNumber} device ${this.deviceId} active=${active} speed=${speed}`);
     
     try {
@@ -164,6 +167,8 @@ export class ACInfinityFanPort {
     
     try {
       const speed = Math.round(Number(value) / 10); // Convert 0-100 to 0-10
+              // DashNet patch: snap HomeKit slider
+              this.fanService.updateCharacteristic(this.platform.Characteristic.RotationSpeed, speed * 10);
       if (this.platform.config.debug) {
         this.platform.log.debug(`[FanPort] Queueing speed change for port ${this.portNumber} on device ${this.deviceId} to ${speed} (HomeKit value: ${value})`);
       }
