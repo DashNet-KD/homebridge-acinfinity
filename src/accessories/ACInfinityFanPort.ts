@@ -62,48 +62,61 @@ export class ACInfinityFanPort {
   }
 
   async setActive(value: CharacteristicValue): Promise<void> {
-    const active = value === this.platform.Characteristic.Active.ACTIVE;
-    // DashNet patch: ignore spurious Active=ON right after off (prevents 10% blips)
-    // HomeKit sometimes emits an Active=ON during RotationSpeed transitions.
-    // If we *just* turned the fan off (lastSetSpeed=0), ignore the ON to avoid a 10% wake.
-    const now = Date.now();
-    const OFF_DEBOUNCE_MS = 2500;
-    if (active && this.lastSetSpeed === 0 && (now - this.lastSetTime) < OFF_DEBOUNCE_MS) {
-      this.platform.log.info(`[FanPort] Ignoring spurious Active=ON (debounce ${OFF_DEBOUNCE_MS}ms) for port ${this.portNumber}`);
-      return;
-    }
-    // Safe wake speed when turning on:
-        // Prefer lastSetSpeed if known, otherwise wake at 1 (10%) instead of blasting to 10 (100%).
-        const wakeSpeed = (this.lastSetSpeed !== null && this.lastSetSpeed > 0) ? this.lastSetSpeed : 1;
-        const speed = active ? wakeSpeed : 0;
-    this.platform.log.info(`[FanPort] SETACTIVE CALLED: port ${this.portNumber} device ${this.deviceId} active=${active} speed=${speed}`);
-    
-    try {
-      this.platform.log.info(`[FanPort] Making API call to set active=${active} (speed=${speed}) for port ${this.portNumber}...`);
-      const device = this.accessory.context.device;
-      await this.platform.client.setDeviceModeSettings(
-        this.deviceId, 
-        this.portNumber, 
-        [[PortControlKey.ON_SPEED, speed]], 
-        device?.devType, 
-        device
-      );
-      this.platform.log.info(`[FanPort] SUCCESS: Active state set to ${active} for port ${this.portNumber}`);
-      
-      // Cache the speed we just set to avoid reverting due to stale API data
-      this.lastSetSpeed = speed;
-      this.lastSetTime = Date.now();
-    } catch (error) {
-      this.platform.log.error(`[FanPort] ERROR setting active state for port ${this.portNumber}:`, error);
-      if (error instanceof Error) {
-        this.platform.log.error(`[FanPort] Error details - Name: ${error.name}, Message: ${error.message}`);
-        if (error.stack) {
-          this.platform.log.error(`[FanPort] Stack trace:`, error.stack);
-        }
-      }
-      throw new this.platform.api.hap.HapStatusError(-70402);
-    }
+
+  const active = value === this.platform.Characteristic.Active.ACTIVE;
+
+  // DashNet patch: ignore Active=ON writes (prevents 10% blips)
+
+  // HomeKit may emit Active=ON during RotationSpeed transitions. Writing Active=ON can cause a wake to 10%.
+
+  // DashNet behavior: treat Active as read-only and ignore Active=ON. Use RotationSpeed to control speed.
+
+  if (active) {
+
+    this.platform.log.info(`[FanPort] Ignoring Active=ON write for port ${this.portNumber}; RotationSpeed is the source of truth.`);
+
+    return;
+
   }
+
+
+  // Active=OFF -> force speed 0
+
+  const speed = 0;
+
+  try {
+
+    const device = this.accessory.context.device;
+
+    await this.platform.client.setDeviceModeSettings(
+
+      this.deviceId,
+
+      this.portNumber,
+
+      [[PortControlKey.ON_SPEED, speed]],
+
+      device?.devType,
+
+      device
+
+    );
+
+    this.lastSetSpeed = speed;
+
+    this.lastSetTime = Date.now();
+
+    this.platform.log.info(`[FanPort] SUCCESS: set speed 0 via Active=OFF for port ${this.portNumber}`);
+
+  } catch (error) {
+
+    this.platform.log.error(`[FanPort] ERROR setting speed 0 via Active=OFF for port ${this.portNumber}:`, error);
+
+    throw new this.platform.api.hap.HapStatusError(-70402);
+
+  }
+}
+
 
   async getState(): Promise<CharacteristicValue> {
     const port = this.accessory.context.port;

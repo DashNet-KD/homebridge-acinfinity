@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 1.3.0-beta.4-dashnet.3
+
+DashNet fork maintained by Keya Dash.
+
+### Fixed
+
+• Treat RotationSpeed as the source of truth and ignore `Active=ON` writes to prevent recurring “ghost 10%” wakes. `Active=OFF` still forces speed 0.
+
+---
+
+
 ## 1.3.0-beta.4-dashnet.2
 
 DashNet fork maintained by Keya Dash.
