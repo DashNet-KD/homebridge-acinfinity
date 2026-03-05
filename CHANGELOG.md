@@ -7,103 +7,155 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.3.0-beta.4] - 2025-08-08
+## 1.3.0-beta.4-dashnet.1 [1.3.0-beta.4] - 2025-08-08
 
 ### Fixed
-- **UIS 69 PRO Complete Fix**: Implemented iPhone app approach for legacy controllers
-  - Uses static payload with real device settings (not hardcoded zeros)
-  - Fetches current settings first, then populates static payload format
-  - Eliminates 403 "Data saving failed" errors on UIS 69 PRO controllers
-  - Tested and confirmed working with actual UIS 69 PRO device
-- **Universal Controller Support**: Perfect hybrid approach now working for both controller types
-  - **UIS 89 AI+** (Type 20): Uses hardcoded static payload (existing approach)
-  - **UIS 69 PRO** (Type 11): Uses iPhone app static payload with real settings (new approach)
-  - Auto-detection chooses the correct method based on device type and newFrameworkDevice flag
-
-### Technical Changes
-- Completely rewrote `setDeviceModeSettingsLegacy()` to use iPhone app approach
-- Legacy controllers now fetch current settings and use them in static payload format
-- Removed Home Assistant fetch-merge approach that wasn't working reliably
-- Uses iPhone app User-Agent (1.9.7) and headers for legacy controllers
-- Maintains proper device settings while only changing the target speed value
-
+DashNet fork maintained by Keya Dash.- **UIS 69 PRO Complete 
+  Fix**: Implemented iPhone app approach for legacy controllers - 
+  Uses static payload with real device settings (not hardcoded 
+  zeros) - Fetches current settings first, then populates static 
+  payload format - Eliminates 403 "Data saving failed" errors on 
+  UIS 69 PRO controllers - Tested and confirmed working with 
+  actual UIS 69 PRO device
+- **Universal Controller Support**: Perfect hybrid approach now 
+  working for both controller types - **UIS 89 AI+** (Type 20): 
+  Uses hardcoded static payload (existing approach) - **UIS 69 
+  PRO** (Type 11): Uses iPhone app static payload with real 
+  settings (new approach) - Auto-detection chooses the correct 
+  method based on device type and newFrameworkDevice flag
+This fork is based on upstream **v1.3.0-beta.4** and introduces 
+behavior improvements intended for environments where AC Infinity 
+fans are controlled by external ladder-style automation logic, 
+such as HomeKit automation systems driven by environmental 
+thresholds (for example PM2.5 air quality levels).
+### Technical Changes Added- Completely rewrote 
+### `setDeviceModeSettingsLegacy()` to use iPhone app approach
+- Legacy controllers now fetch current settings and use them in 
+static payload format - Removed Home Assistant fetch-merge 
+approach that wasn't working reliably - Uses iPhone app User-Agent 
+(1.9.7) and headers for legacy controllers - Maintains proper 
+device settings while only changing the target speed value • 
+**Snap-to-10 fan speed control**
 ### Background
-Testing with both controller types revealed that UIS 69 PRO controllers work perfectly with the iPhone app's approach: fetch current settings and populate them into a static payload format (without modeSetid field). This approach was captured from iPhone app network traffic and has been confirmed working with real devices.
-
+HomeKit fan speed values are immediately snapped to the nearest 
+multiple of 10.  Testing with both controller types revealed that 
+UIS 69 PRO controllers work perfectly with the iPhone app's 
+approach: fetch current settings and populate them into a static 
+payload format (without modeSetid field). This approach was 
+captured from iPhone app network traffic and has been confirmed 
+working with real devices. Examples:
 ## [1.3.0-beta.3] - 2025-08-08
-
-### Fixed
-- **User-Agent Compatibility**: Legacy controllers now use Home Assistant's exact User-Agent string
-  - Changed from `ACController/1.9.7` to `ACController/1.8.2` for legacy devices
-  - Uses Home Assistant's exact header combination: User-Agent + Content-Type + token only
-  - Should finally resolve 403 "Data saving failed" errors on UIS 69 PRO controllers
-
+23% → 20% 37% → 40% ### Fixed - **User-Agent Compatibility**: 
+Legacy controllers now use Home Assistant's exact User-Agent 
+string 64% → 60% - Changed from `ACController/1.9.7` to 
+`ACController/1.8.2` for legacy devices
+  - Uses Home Assistant's exact header combination: User-Agent + 
+  Content-Type + token only - Should finally resolve 403 "Data 
+  saving failed" errors on UIS 69 PRO controllers
+This ensures that manual control always aligns with fixed 
+automation steps and prevents unnecessary device writes caused by 
+intermediate slider values produced by the HomeKit UI.
 ### Technical Changes
-- Legacy controllers now create separate axios instances with Home Assistant's exact configuration
-- Both `getDeviceModeSettingsListLegacy()` and `setDeviceModeSettingsLegacy()` use HA's User-Agent
-- Maintains modern approach for newer controllers while perfectly mimicking HA for legacy devices
+• **Safe wake speed behavior**- Legacy controllers now create 
+separate axios instances with Home Assistant's exact configuration 
+- Both `getDeviceModeSettingsListLegacy()` and 
+`setDeviceModeSettingsLegacy()` use HA's User-Agent - Maintains 
+modern approach for newer controllers while perfectly mimicking HA 
+for legacy devices
 
 ## [1.3.0-beta.2] - 2025-08-08
-
-### Fixed
-- **Legacy Controller API Compatibility**: Updated legacy controllers to use simplified headers like Home Assistant
-  - Removed `phoneType`, `appVersion`, and `minversion` headers for UIS 69 PRO controllers
-  - Uses only `token` header for legacy device API calls, matching Home Assistant's working approach
-  - Should resolve persistent 403 "Data saving failed" errors on older controllers
-
-### Technical Changes
-- Added `getLegacyHeaders()` method that uses minimal headers for older controllers
-- Added `getDeviceModeSettingsListLegacy()` method for simplified API calls
-- Legacy controllers now use Home Assistant's exact header approach instead of official app headers
-
+The upstream plugin woke the fan at 100% whenever the fan 
+transitioned from OFF to ON. This fork instead restores the 
+previous speed if one exists, or wakes the fan at 10% if no 
+previous speed has been recorded.### Fixed - **Legacy Controller 
+API Compatibility**: Updated legacy controllers to use simplified 
+headers like Home Assistant
+  - Removed `phoneType`, `appVersion`, and `minversion` headers 
+  for UIS 69 PRO controllers - Uses only `token` header for legacy 
+  device API calls, matching Home Assistant's working approach - 
+  Should resolve persistent 403 "Data saving failed" errors on 
+  older controllers
+This prevents sudden 100% airflow bursts and allows automation 
+systems to reassert the correct speed smoothly.
+### Technical Changes Purpose- Added `getLegacyHeaders()` method 
+### that uses minimal headers for older controllers
+- Added `getDeviceModeSettingsListLegacy()` method for simplified 
+API calls - Legacy controllers now use Home Assistant's exact 
+header approach instead of official app headers This fork is 
+optimized for installations where fan speeds are controlled by 
+**step-based environmental control logic** rather than free-form 
+manual sliders.
 ## [1.3.0-beta.1] - 2025-08-07
-
+In these systems, automation rules form a ladder of thresholds 
+that adjust fan speed incrementally as environmental conditions 
+change. A typical ladder might resemble:
 ### Added
-- **Universal Controller Support**: Hybrid API approach supporting both older and newer AC Infinity controllers
-  - **UIS 69 PRO** (type 11) - Uses Home Assistant-inspired fetch-merge approach
-  - **UIS 69 PRO+** (type 18) - Uses Home Assistant-inspired fetch-merge approach  
-  - **UIS 89 AI+** (type 20) - Uses static payload approach from official app
-- **Intelligent Controller Detection**: Automatically detects device framework and chooses appropriate API method
-- **Legacy Controller Compatibility**: Implements Home Assistant's proven approach for older controllers
-  - Fetches current settings before making changes
-  - Cleans payload by removing incompatible fields
-  - Converts data types properly (string IDs to integers)
-  - Adds required default values
-
+PM2.5 ≥ 60 → Fan 20% - **Universal Controller Support**: Hybrid 
+  API approach supporting both older and newer AC Infinity 
+  controllers - **UIS 69 PRO** (type 11) - Uses Home 
+  Assistant-inspired fetch-merge approach - **UIS 69 PRO+** (type 
+  18) - Uses Home Assistant-inspired fetch-merge approach - **UIS 
+  89 AI+** (type 20) - Uses static payload approach from official 
+  app
+PM2.5 ≥ 150 → Fan 40% - **Intelligent Controller Detection**: 
+Automatically detects device framework and chooses appropriate API 
+method - **Legacy Controller Compatibility**: Implements Home 
+Assistant's proven approach for older controllers PM2.5 ≥ 500 → 
+Fan 60% - Fetches current settings before making changes PM2.5 ≥ 
+650 → Fan 70% - Cleans payload by removing incompatible fields
+  - Converts data types properly (string IDs to integers) - Adds 
+  required default values
+And step down as air quality improves:
 ### Fixed
-- **999999 "Operation failed" errors** on UIS 69 PRO and similar older controllers
-- **Device-specific API handling** based on `newFrameworkDevice` flag and device type
-- **Proper field handling** for different controller generations
-
-### Technical Changes
-- Added `isNewFrameworkDevice()` detection function
-- Split `setDeviceModeSettings()` into framework-specific methods:
-  - `setDeviceModeSettingsNewFramework()` - Static payload for AI+ controllers
-  - `setDeviceModeSettingsLegacy()` - Fetch-merge approach for older controllers
-- Enhanced debug logging to show which API approach is being used
-- Added device type and data passing from accessories to API client
+PM2.5 ≤ 200 → Fan 50% (if previously ≥70%) - **999999 "Operation 
+failed" errors** on UIS 69 PRO and similar older controllers - 
+**Device-specific API handling** based on `newFrameworkDevice` 
+flag and device type - **Proper field handling** for different 
+controller generations PM2.5 ≤ 200 → Fan 40% PM2.5 ≤ 110 → Fan 30% 
+### Technical Changes - Added `isNewFrameworkDevice()` detection 
+function - Split `setDeviceModeSettings()` into framework-specific 
+methods: PM2.5 ≤ 42 → Fan 20% - 
+`setDeviceModeSettingsNewFramework()` - Static payload for AI+ 
+controllers PM2.5 ≤ 15 → Fan OFF - `setDeviceModeSettingsLegacy()` 
+- Fetch-merge approach for older controllers - Enhanced debug 
+logging to show which API approach is being used - Added device 
+type and data passing from accessories to API client
 
 ### Background
-Analysis of the Home Assistant AC Infinity plugin revealed that older controllers (UIS 69 PRO) require a different API approach than newer controllers (UIS 89 AI+). Older controllers reject static payloads and need current settings fetched first, then merged with changes. This release implements a hybrid approach that automatically chooses the correct method based on controller type.
+By ensuring fan speeds remain aligned with fixed step values, this 
+fork prevents conflicts between HomeKit UI input and automation 
+ladder logic.Analysis of the Home Assistant AC Infinity plugin 
+revealed that older controllers (UIS 69 PRO) require a different 
+API approach than newer controllers (UIS 89 AI+). Older 
+controllers reject static payloads and need current settings 
+fetched first, then merged with changes. This release implements a 
+hybrid approach that automatically chooses the correct method 
+based on controller type.
 
 ## [1.2.13] - 2025-08-07
-
-### Fixed
-- **Speed Caching Solution**: Implemented intelligent speed caching to prevent HomeKit from reverting to stale values
-  - Returns the speed you just set for 5 seconds after API calls
-  - Prevents display reverting due to AC Infinity's 5+ second device update delay
-  - Maintains correct HomeKit display while device processes changes
-- **API Parameter Optimization**: Updated to set both `onSelfSpead` and `onSpead` fields for maximum compatibility
-- **Root Cause Resolution**: Addressed the core issue where device API returns stale data immediately after speed changes
-
-### Technical Changes
-- Added `lastSetSpeed` and `lastSetTime` caching in `ACInfinityFanPort`
-- Enhanced `getSpeed()` method to return cached values for 5 seconds after API calls
-- Updated both `setSpeed()` and `setActive()` methods to cache their values
-- Improved API payload to match working test scenarios more precisely
+### Notes Fixed
+- **Speed Caching Solution**: Implemented intelligent speed 
+  caching to prevent HomeKit from reverting to stale values - 
+  Returns the speed you just set for 5 seconds after API calls - 
+  Prevents display reverting due to AC Infinity's 5+ second device 
+  update delay - Maintains correct HomeKit display while device 
+  processes changes
+• No changes were made to the AC Infinity API behavior - **API 
+Parameter Optimization**: Updated to set both `onSelfSpead` and 
+`onSpead` fields for maximum compatibility - **Root Cause 
+Resolution**: Addressed the core issue where device API returns 
+stale data immediately after speed changes • Fully compatible with 
+existing Homebridge configurations • Preserves HomeKit accessory 
+identity (no device re-pairing required)### Technical Changes - 
+Added `lastSetSpeed` and `lastSetTime` caching in 
+`ACInfinityFanPort` - Enhanced `getSpeed()` method to return 
+cached values for 5 seconds after API calls - Updated both 
+`setSpeed()` and `setActive()` methods to cache their values - 
+Improved API payload to match working test scenarios more 
+precisely
 
 ### Background
-Testing revealed that AC Infinity devices have a 5+ second delay before reporting updated speed values via the API. HomeKit's immediate polling after speed changes was getting stale data, causing the display to revert. This release implements intelligent caching to maintain the correct display while the device processes the change.
+Upstream project: https://github.com/keithah/homebridge-acinfinityTesting revealed that AC Infinity devices have a 5+ second delay before reporting updated speed values via the API. HomeKit's immediate polling after speed changes was getting stale data, causing the display to revert. This release implements intelligent caching to maintain the correct display while the device processes the change.
 
 ## [1.2.12] - 2025-08-07
 
