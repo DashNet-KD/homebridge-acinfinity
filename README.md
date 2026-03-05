@@ -1,109 +1,46 @@
-# homebridge-acinfinity
+# homebridge-acinfinity (DashNet fork)
 
-Homebridge plugin for AC Infinity controllers.
+This is a DashNet-maintained fork of the upstream AC Infinity Homebridge plugin.
 
-## Features
+**Primary goal:** stable HomeKit control in environments where fan speed is managed by automation “ladder logic” (step-based threshold rules), rather than continuous manual slider values.
 
-- Support for AC Infinity UIS Controllers (69 Pro, 69 Pro+, 89 AI+)
-- Control fan ports (on/off, speed control)
-- Monitor temperature and humidity sensors
-- Support for additional probe sensors (temperature, humidity, CO2)
-- Auto-discovery of devices
-- Configurable polling interval
+Upstream project: https://github.com/keithah/homebridge-acinfinity
 
-## Installation
+## What “ladder logic” means here
 
-1. Install Homebridge (if not already installed):
-```bash
-npm install -g homebridge
-```
+In this context, **ladder logic** refers to step-based automation rules (“rungs”) that set fan speed when a sensor crosses thresholds, similar to PLC-style control systems.
 
-2. Install the plugin:
-```bash
-npm install -g homebridge-acinfinity
-```
+Example (PM2.5 ladder):
 
-3. Configure the plugin in your Homebridge config.json
+- PM2.5 ≥ 60  → Fan 20%
+- PM2.5 ≥ 150 → Fan 40%
+- PM2.5 ≥ 500 → Fan 60%
+- PM2.5 ≥ 650 → Fan 70%
 
-## Configuration
+And step-down behavior as air quality improves:
 
-Add the following to your Homebridge `config.json`:
+- PM2.5 ≤ 200 → Fan 50% (if previously ≥70%)
+- PM2.5 ≤ 200 → Fan 40%
+- PM2.5 ≤ 110 → Fan 30%
+- PM2.5 ≤ 42  → Fan 20%
+- PM2.5 ≤ 15  → Fan OFF
 
-```json
-{
-  "platforms": [
-    {
-      "platform": "ACInfinity",
-      "name": "AC Infinity",
-      "email": "your-email@example.com",
-      "password": "your-password",
-      "pollingInterval": 10
-    }
-  ]
-}
-```
+This fork keeps the plugin behavior aligned with fixed-step automation so HomeKit UI jitter and “Active” writes do not fight the automation ladder.
 
-### Configuration Options
+## DashNet changes
 
-- `platform` (required): Must be "ACInfinity"
-- `name` (required): Display name for the platform
-- `email` (required): Your AC Infinity account email
-- `password` (required): Your AC Infinity account password
-- `pollingInterval` (optional): How often to poll for updates in seconds (default: 10, min: 5, max: 600)
-- `host` (optional): API host URL (default: "http://www.acinfinityserver.com")
-- `debug` (optional): Enable debug logging for troubleshooting API issues (default: false)
+### 1) Snap-to-10 fan speed control (UI alignment)
+HomeKit fan speed is snapped to multiples of 10 (20, 30, 40, 60, 70, etc.). This prevents intermediate slider values from fighting step-based automations.
 
-## Supported Devices
+### 2) Safe wake speed behavior
+Prevents sudden “wake at 100%” behavior on Active=ON. The plugin uses the last known speed rather than blasting to full power.
 
-- UIS Controller 69 Pro
-- UIS Controller 69 Pro+
-- UIS Controller 89 AI+
+### 3) Prevent spurious 10% wakes after OFF
+HomeKit can emit an `Active=ON` write immediately after a `RotationSpeed=0` (OFF) write. This fork ignores those spurious ON events briefly after an OFF so the fan does not pop back to 10%.
 
-## Exposed Services
+## Versioning
+DashNet versions are tagged as:
 
-### Per Controller:
-- **Temperature Sensor**: Built-in temperature sensor
-- **Humidity Sensor**: Built-in humidity sensor
+- `1.3.0-beta.4-dashnet.X`
 
-### Per Port:
-- **Fan**: Control each port as a fan accessory
-  - On/Off control
-  - Speed control (0-100%)
-  - Current state monitoring
-
-### Additional Sensors (AI Controllers):
-- **Probe Temperature**: External temperature probes
-- **Probe Humidity**: External humidity probes
-- **CO2 Sensor**: CO2 monitoring with detection alerts
-
-## Notes
-
-- The plugin uses the same API as the official AC Infinity mobile app
-- Password is limited to 25 characters (same as the mobile app)
-- All temperature values are in Celsius in HomeKit
-- Fan speed is mapped from AC Infinity's 0-10 scale to HomeKit's 0-100%
-
-## Troubleshooting
-
-1. **Authentication Failed**: Ensure your email and password are correct
-2. **No Devices Found**: Make sure your devices are online and accessible through the AC Infinity app
-3. **Slow Updates**: Try adjusting the polling interval in the configuration
-4. **API Errors (403 Forbidden)**: Enable debug mode to see detailed API requests and responses:
-   ```json
-   {
-     "platform": "ACInfinity",
-     "name": "AC Infinity",
-     "email": "your-email@example.com",
-     "password": "your-password",
-     "debug": true
-   }
-   ```
-   This will log all API requests/responses to help diagnose issues with "Data saving failed" errors
-
-## Credits
-
-This plugin is based on the [homeassistant-acinfinity](https://github.com/dalinicus/homeassistant-acinfinity) integration by @dalinicus.
-
-## License
-
-MIT
+See CHANGELOG.md for details.

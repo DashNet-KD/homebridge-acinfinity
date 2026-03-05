@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 1.3.0-beta.4-dashnet.2
+
+DashNet fork maintained by Keya Dash.
+
+### Fixed
+
+• Prevent spurious 10% wake-ups when HomeKit issues an `Active=ON` write immediately after a `RotationSpeed=0` (OFF) write. The plugin now ignores `Active=ON` events that occur within ~2.5 seconds of an explicit OFF, keeping 0% as the source of truth.
+
+---
+
+
 ## 1.3.0-beta.4-dashnet.1 [1.3.0-beta.4] - 2025-08-08
 
 ### Fixed

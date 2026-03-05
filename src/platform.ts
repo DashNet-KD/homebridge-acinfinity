@@ -56,6 +56,7 @@ export class ACInfinityPlatform implements DynamicPlatformPlugin {
     this.pollingInterval = Math.max(5, Math.min(600, config.pollingInterval || 10)) * 1000;
 
     this.log.info(`[AC Infinity] Initializing ACInfinity platform v${packageJson.version}...`);
+    this.log.info(`[AC Infinity] DashNet fork active (snap-to-10 + safe wake speed)`);
     if (config.debug) {
       this.log.info('[AC Infinity] Debug mode enabled - detailed logging active');
     }

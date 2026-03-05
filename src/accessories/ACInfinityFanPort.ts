@@ -63,6 +63,15 @@ export class ACInfinityFanPort {
 
   async setActive(value: CharacteristicValue): Promise<void> {
     const active = value === this.platform.Characteristic.Active.ACTIVE;
+    // DashNet patch: ignore spurious Active=ON right after off (prevents 10% blips)
+    // HomeKit sometimes emits an Active=ON during RotationSpeed transitions.
+    // If we *just* turned the fan off (lastSetSpeed=0), ignore the ON to avoid a 10% wake.
+    const now = Date.now();
+    const OFF_DEBOUNCE_MS = 2500;
+    if (active && this.lastSetSpeed === 0 && (now - this.lastSetTime) < OFF_DEBOUNCE_MS) {
+      this.platform.log.info(`[FanPort] Ignoring spurious Active=ON (debounce ${OFF_DEBOUNCE_MS}ms) for port ${this.portNumber}`);
+      return;
+    }
     // Safe wake speed when turning on:
         // Prefer lastSetSpeed if known, otherwise wake at 1 (10%) instead of blasting to 10 (100%).
         const wakeSpeed = (this.lastSetSpeed !== null && this.lastSetSpeed > 0) ? this.lastSetSpeed : 1;
