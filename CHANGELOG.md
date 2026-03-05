@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 1.3.0-beta.4-dashnet.4
+
+DashNet fork maintained by Keya Dash.
+
+### Added
+
+• Coalesce duplicate RotationSpeed writes within a short window (1500ms) to reduce racing/duplicate API calls and improve stability under automation ladders that may issue repeated writes.
+
+---
+
+
 ## 1.3.0-beta.4-dashnet.3
 
 DashNet fork maintained by Keya Dash.

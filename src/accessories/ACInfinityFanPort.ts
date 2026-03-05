@@ -189,6 +189,16 @@ export class ACInfinityFanPort {
     
     try {
       const speed = Math.round(Number(value) / 10); // Convert 0-100 to 0-10
+      // DashNet patch: coalesce duplicate speed writes (prevents racing)
+      // If the requested speed matches what we just set very recently, skip the API call.
+      const now = Date.now();
+      const COALESCE_MS = 1500;
+      if (this.lastSetSpeed === speed && (now - this.lastSetTime) < COALESCE_MS) {
+        this.platform.log.info(`[FanPort] Coalescing duplicate SETSPEED to ${speed} for port ${this.portNumber} (within ${COALESCE_MS}ms)`);
+        // Keep UI aligned with snapped speed
+        this.fanService.updateCharacteristic(this.platform.Characteristic.RotationSpeed, speed * 10);
+        return;
+      }
               // DashNet patch: snap HomeKit slider
               this.fanService.updateCharacteristic(this.platform.Characteristic.RotationSpeed, speed * 10);
       if (this.platform.config.debug) {
