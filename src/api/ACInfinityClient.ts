@@ -150,6 +150,30 @@ export class ACInfinityClient {
     }
   }
 
+  /**
+   * Wrap an API call so that if AC Infinity returns 403 / "Login Expired",
+   * we transparently re-authenticate and retry once. Root-caused during
+   * the 2026-07-01 fan-control outage: cloud token invalidated after
+   * long uptime; plugin had no recovery path.
+   */
+  private async _withReauth<T>(fn: () => Promise<T>, opName: string): Promise<T> {
+    try {
+      return await fn();
+    } catch (error) {
+      if (error instanceof ACInfinityClientRequestFailed) {
+        const resp: any = (error as ACInfinityClientRequestFailed).response ?? {};
+        const codeIs403 = resp.code === 403 || resp.code === "403";
+        const msgSaysExpired = typeof resp.msg === "string" && /login\s*expired/i.test(resp.msg);
+        if (codeIs403 || msgSaysExpired) {
+          this.log.warn(`[${opName}] AC Infinity cloud auth token expired (code=${resp.code}, msg=${resp.msg}) - re-authenticating and retrying once`);
+          await this.login();
+          return await fn();
+        }
+      }
+      throw error;
+    }
+  }
+
   isLoggedIn(): boolean {
     return this.userId !== null;
   }
@@ -239,6 +263,7 @@ export class ACInfinityClient {
       throw new ACInfinityClientError('AC Infinity client is not logged in');
     }
 
+    return this._withReauth(async () => {
     try {
       // Create axios instance with Home Assistant's exact User-Agent
       const legacyAxios = axios.create({
@@ -274,6 +299,7 @@ export class ACInfinityClient {
       }
       this.handleHttpError(error, 'getDeviceModeSettingsListLegacy');
     }
+    }, 'getDeviceModeSettingsListLegacy');
   }
 
   async setDeviceModeSettings(
@@ -431,6 +457,7 @@ export class ACInfinityClient {
     portId: number,
     keyValues: Array<[string, number]>
   ): Promise<void> {
+    return this._withReauth(async () => {
     try {
       // Extract speed from keyValues for iPhone app approach
       let speed = 0;
@@ -563,6 +590,7 @@ export class ACInfinityClient {
       }
       this.handleHttpError(error, 'setDeviceModeSettingsLegacy');
     }
+    }, 'setDeviceModeSettingsLegacy');
   }
 
   async getDeviceSettings(deviceId: string | number, port: number): Promise<any> {
