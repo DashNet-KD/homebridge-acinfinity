@@ -1,6 +1,6 @@
 {
   "name": "homebridge-acinfinity",
-  "version": "999.0.0-dashnet.6",
+  "version": "999.0.0-dashnet.7",
   "description": "Homebridge plugin for AC Infinity controllers",
   "main": "dist/index.js",
   "scripts": {

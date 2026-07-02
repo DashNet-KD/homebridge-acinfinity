@@ -1,6 +1,90 @@
 import { PlatformAccessory, CharacteristicValue } from 'homebridge';
 import { ACInfinityPlatform } from '../platform';
 import { ControllerPropertyKey, PortPropertyKey, PortControlKey, PortMode } from '../constants';
+import * as fs from 'fs';
+
+const TRACKER_FILE = '/var/lib/homebridge/fan_stage_tracker.json';
+const FAN_COMMAND_FILE = '/opt/aq-controller/commands/fan_command.json';
+const FAN_COMMAND_ARCHIVE_DIR = '/opt/aq-controller/commands/archive';
+const FAN_LIVE_STATE_FILE = '/var/lib/homebridge/fan_live_state.json';
+
+type StageTracker = {
+  current_stage: number | null;
+  current_started_at: number | null;
+  last_stage: number | null;
+  last_duration: number | null;
+};
+
+function stageForPercent(speed: number | null): number | null {
+  if (speed === null || speed === undefined || Number.isNaN(speed)) {
+    return null;
+  }
+  const v = Math.max(0, Math.min(100, Math.round(speed)));
+  if (v == 0) return 0;
+  if (v <= 39) return 1;
+  if (v <= 59) return 2;
+  if (v <= 69) return 3;
+  if (v <= 89) return 4;
+  return 5;
+}
+
+function loadTracker(): StageTracker {
+  try {
+    const raw = fs.readFileSync(TRACKER_FILE, 'utf8');
+    const data = JSON.parse(raw);
+    return {
+      current_stage: data.current_stage ?? null,
+      current_started_at: data.current_started_at ?? null,
+      last_stage: data.last_stage ?? null,
+      last_duration: data.last_duration ?? null,
+    };
+  } catch {
+    return {
+      current_stage: null,
+      current_started_at: null,
+      last_stage: null,
+      last_duration: null,
+    };
+  }
+}
+
+function saveTracker(tracker: StageTracker): void {
+  try {
+    fs.writeFileSync(TRACKER_FILE, JSON.stringify(tracker));
+  } catch {
+    // ignore
+  }
+}
+
+function noteStage(speedPercent: number | null): void {
+  const stage = stageForPercent(speedPercent);
+  if (stage === null) {
+    return;
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  const tracker = loadTracker();
+
+  if (tracker.current_stage === null || tracker.current_started_at === null) {
+    tracker.current_stage = stage;
+    tracker.current_started_at = now;
+    saveTracker(tracker);
+    return;
+  }
+
+  if (tracker.current_stage !== stage) {
+    const duration = now - tracker.current_started_at;
+
+    if (duration >= 10) {
+      tracker.last_stage = tracker.current_stage;
+      tracker.last_duration = duration;
+    }
+
+    tracker.current_stage = stage;
+    tracker.current_started_at = now;
+    saveTracker(tracker);
+  }
+}
 
 export class ACInfinityFanPort {
   private readonly platform: ACInfinityPlatform;
@@ -11,6 +95,7 @@ export class ACInfinityFanPort {
   private readonly fanService;
   private lastSetSpeed: number | null = null;
   private lastSetTime: number = 0;
+  private commandPollTimer: NodeJS.Timeout | null = null;
 
   constructor(platform: ACInfinityPlatform, accessory: PlatformAccessory) {
     this.platform = platform;
@@ -49,6 +134,195 @@ export class ACInfinityFanPort {
     this.fanService.getCharacteristic(this.platform.Characteristic.RotationSpeed)
       .onGet(this.getSpeed.bind(this))
       .onSet(this.setSpeed.bind(this));
+
+    if (this.portNumber === 1) {
+      this.startCommandPoller();
+    }
+  }
+
+  startCommandPoller(): void {
+    this.platform.log.info('[FanPort] startCommandPoller armed for port ' + this.portNumber);
+    if (this.commandPollTimer) {
+      return;
+    }
+    this.commandPollTimer = setInterval(() => {
+      this.processQueuedCommand().catch((error) => {
+        this.platform.log.error('[FanPort] ERROR processing queued command:', error);
+      });
+    }, 2000);
+  }
+
+  writeLiveState(speedPercent: number): void {
+    try {
+      const payload = {
+        ts: Math.floor(Date.now() / 1000),
+        fan_speed: Number(speedPercent),
+        fan_active: Number(speedPercent) > 0,
+        fan_current_state: Number(speedPercent) > 0 ? 2 : 0,
+        port_number: this.portNumber,
+        device_id: this.deviceId,
+      };
+      fs.writeFileSync(FAN_LIVE_STATE_FILE, JSON.stringify(payload));
+    } catch (error) {
+      this.platform.log.error('[FanPort] ERROR writing live state file:', error);
+    }
+  }
+
+  readQueuedCommand(): any | null {
+    try {
+      if (!fs.existsSync(FAN_COMMAND_FILE)) {
+        return null;
+      }
+      const raw = fs.readFileSync(FAN_COMMAND_FILE, 'utf8');
+      const data = JSON.parse(raw);
+      if (!data || typeof data !== 'object') {
+        return null;
+      }
+      return data;
+    } catch {
+      return null;
+    }
+  }
+
+  archiveQueuedCommand(data: any): void {
+    try {
+      fs.mkdirSync(FAN_COMMAND_ARCHIVE_DIR, { recursive: true });
+      const ts = new Date().toISOString().replace(/[:.]/g, '-');
+      const out = FAN_COMMAND_ARCHIVE_DIR + '/fan_command.plugin.' + ts + '.' + (data.target_speed ?? 'unknown') + '.json';
+      fs.renameSync(FAN_COMMAND_FILE, out);
+    } catch (error) {
+      this.platform.log.error('[FanPort] ERROR archiving queued command:', error);
+      try {
+        fs.unlinkSync(FAN_COMMAND_FILE);
+      } catch {
+      }
+    }
+  }
+
+  async processQueuedCommand(): Promise<void> {
+    const data = this.readQueuedCommand();
+    if (!data) {
+      return;
+    }
+
+    if (!String(data.reason || '').startsWith('auto_surge') &&
+        !String(data.reason || '').startsWith('python_ladder') && !String(data.reason || "").startsWith("manual_override")) {
+      return;
+    }
+
+    if (String(data.device_id || '') !== String(this.deviceId)) {
+      return;
+    }
+
+    if (Number(data.port_number || 0) !== this.portNumber) {
+      return;
+    }
+
+    const targetPercent = Number(data.target_speed);
+    if (![0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100].includes(targetPercent)) {
+      this.platform.log.error('[FanPort] Queued command has invalid target_speed:', data.target_speed);
+      this.archiveQueuedCommand(data);
+      return;
+    }
+
+    const speed = Math.round(targetPercent / 10);
+    const now = Date.now();
+    const COALESCE_MS = 1500;
+    if (this.lastSetSpeed === speed && (now - this.lastSetTime) < COALESCE_MS) {
+      this.archiveQueuedCommand(data);
+      return;
+    }
+
+    this.platform.log.info('[FanPort] Processing queued command (' + data.reason + ') to ' + speed + ' for port ' + this.portNumber);
+    this.fanService.getCharacteristic(this.platform.Characteristic.RotationSpeed).setValue(speed * 10);
+
+    await this.platform.queueRequest(async () => {
+      if (this.platform.config.debug) {
+        this.platform.log.debug('[FanPort] Executing queued speed change for port ' + this.portNumber + ' on device ' + this.deviceId + ' to ' + speed);
+      }
+      const device = this.accessory.context.device;
+      return this.platform.client.setDeviceModeSettings(
+        this.deviceId,
+        this.portNumber,
+        [[PortControlKey.ON_SPEED, speed]],
+        device?.devType,
+        device
+      );
+    });
+
+    this.lastSetSpeed = speed;
+    this.lastSetTime = Date.now();
+
+    const port = this.accessory.context.port;
+    if (port) {
+      port[PortPropertyKey.SPEAK] = speed;
+      port[PortPropertyKey.STATE] = speed > 0 ? 1 : 0;
+      if (typeof PortPropertyKey.CURRENT_MODE !== 'undefined') {
+        port[PortPropertyKey.CURRENT_MODE] = PortMode.ON;
+      }
+    }
+
+    const device = this.accessory.context.device;
+    if (device && device.deviceInfo) {
+      device.deviceInfo.speak = speed;
+      device.deviceInfo.curMode = PortMode.ON;
+      device.deviceInfo.powerState = speed > 0 ? 1 : 0;
+      if (Array.isArray(device.deviceInfo.ports)) {
+        const idx = this.portNumber - 1;
+        if (device.deviceInfo.ports[idx]) {
+          device.deviceInfo.ports[idx].speak = speed;
+          device.deviceInfo.ports[idx].loadState = speed > 0 ? 1 : 0;
+          device.deviceInfo.ports[idx].curMode = PortMode.ON;
+          device.deviceInfo.ports[idx].state = speed > 0 ? 1 : 0;
+        }
+      }
+    }
+
+    this.accessory.context.port = port;
+    this.accessory.context.device = device;
+
+    this.fanService.updateCharacteristic(this.platform.Characteristic.RotationSpeed, speed * 10);
+    this.fanService.updateCharacteristic(
+      this.platform.Characteristic.Active,
+      speed > 0 ? this.platform.Characteristic.Active.ACTIVE : this.platform.Characteristic.Active.INACTIVE
+    );
+    this.fanService.updateCharacteristic(
+      this.platform.Characteristic.CurrentFanState,
+      speed > 0 ? this.platform.Characteristic.CurrentFanState.BLOWING_AIR : this.platform.Characteristic.CurrentFanState.IDLE
+    );
+    this.fanService.updateCharacteristic(
+      this.platform.Characteristic.TargetFanState,
+      this.platform.Characteristic.TargetFanState.MANUAL
+    );
+    this.platform.api.updatePlatformAccessories([this.accessory]);
+
+    try {
+      const devices = await this.platform.queueRequest(() => this.platform.client.getDevicesListAll());
+      const freshDevice = Array.isArray(devices) ? devices.find((d: any) => String(d.devId) === String(this.deviceId)) : null;
+      const freshPorts = freshDevice && freshDevice.deviceInfo && Array.isArray(freshDevice.deviceInfo.ports)
+        ? freshDevice.deviceInfo.ports
+        : null;
+      const freshPort = freshPorts ? freshPorts.find((pp: any) => Number(pp.port) === this.portNumber) : null;
+
+      if (freshDevice && freshPort) {
+        this.accessory.context.device = freshDevice;
+        this.accessory.context.port = freshPort;
+        this.updatePort(freshPort);
+        this.platform.log.info('[FanPort] Applied fresh polled port state after queued auto_surge for port ' + this.portNumber);
+      } else {
+        this.platform.log.error('[FanPort] Fresh poll after queued auto_surge did not find matching device/port for port ' + this.portNumber);
+      }
+    } catch (error) {
+      this.platform.log.error('[FanPort] ERROR refreshing polled state after queued auto_surge for port ' + this.portNumber + ':', error);
+    }
+
+    if (this.portNumber === 1) {
+      noteStage(speed * 10);
+      this.writeLiveState(speed * 10);
+    }
+
+    this.platform.log.info('[FanPort] SUCCESS: queued command (' + data.reason + ') set speed to ' + speed + ' for port ' + this.portNumber);
+    this.archiveQueuedCommand(data);
   }
 
   async getActive(): Promise<CharacteristicValue> {
@@ -105,6 +379,11 @@ export class ACInfinityFanPort {
     this.lastSetSpeed = speed;
 
     this.lastSetTime = Date.now();
+
+    if (this.portNumber === 1) {
+      noteStage(0);
+      this.writeLiveState(0);
+    }
 
     this.platform.log.info(`[FanPort] SUCCESS: set speed 0 via Active=OFF for port ${this.portNumber}`);
 
@@ -226,6 +505,11 @@ export class ACInfinityFanPort {
       // Cache the speed we just set to avoid reverting due to stale API data
       this.lastSetSpeed = speed;
       this.lastSetTime = Date.now();
+
+      if (this.portNumber === 1) {
+        noteStage(speed * 10);
+        this.writeLiveState(speed * 10);
+      }
       
       if (this.platform.config.debug) {
         this.platform.log.debug(`[FanPort] Cached speed ${speed} for port ${this.portNumber}`);
@@ -269,10 +553,16 @@ export class ACInfinityFanPort {
     
     // Update rotation speed to reflect actual current power
     const currentPower = port[PortPropertyKey.SPEAK] || 0;
+    const currentPercent = currentPower * 10;
     this.fanService.updateCharacteristic(
       this.platform.Characteristic.RotationSpeed,
-      currentPower * 10 // Convert 0-10 to 0-100
+      currentPercent // Convert 0-10 to 0-100
     );
+
+    if (this.portNumber === 1) {
+      noteStage(currentPercent);
+      this.writeLiveState(currentPercent);
+    }
     
     // Update target fan state based on current mode
     const currentMode = port[PortPropertyKey.CURRENT_MODE];
